@@ -42,9 +42,7 @@ services:
 
   # SciNote Web Application
   web:
-    build:
-      context: ./scinote-web
-      dockerfile: Dockerfile.production
+    image: scinote/scinote-web:latest
     container_name: scinote_web
     restart: unless-stopped
     depends_on:
@@ -130,9 +128,7 @@ services:
 
   # Background Jobs Worker
   jobs:
-    build:
-      context: ./scinote-web
-      dockerfile: Dockerfile.production
+    image: scinote/scinote-web:latest
     container_name: scinote_jobs
     restart: unless-stopped
     depends_on:
