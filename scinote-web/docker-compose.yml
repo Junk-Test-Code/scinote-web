@@ -1,0 +1,213 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: scinote_db
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-54329}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-scinote_production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scinote_network
+
+  # Redis for Action Cable and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: scinote_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-63791}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scinote_network
+
+  # SciNote Web Application
+  web:
+    build:
+      context: ./scinote-web
+      dockerfile: Dockerfile.production
+    container_name: scinote_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-37842}:3000"
+    environment:
+      # Rails Environment
+      RAILS_ENV: production
+      RAILS_SERVE_STATIC_FILES: "true"
+      RAILS_LOG_TO_STDOUT: "true"
+      
+      # Secret Key Base (MUST be changed in production)
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      
+      # Database Configuration
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-scinote_production}
+      
+      # Redis Configuration
+      REDIS_URL: redis://redis:6379/0
+      
+      # Active Storage Configuration - S3
+      ACTIVESTORAGE_SERVICE: ${ACTIVESTORAGE_SERVICE:-amazon}
+      
+      # S3 Provider Configuration (AWS or S3-compatible services)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_SUBFOLDER: ${S3_SUBFOLDER:-scinote}
+      
+      # S3-Compatible Services Configuration
+      # Set AWS_ENDPOINT to use S3-compatible services (DigitalOcean, Wasabi, MinIO, etc.)
+      # Examples:
+      #   DigitalOcean Spaces: https://nyc3.digitaloceanspaces.com
+      #   Wasabi: https://s3.wasabisys.com
+      #   MinIO: http://minio-server:9000
+      #   Backblaze B2: https://s3.us-west-000.backblazeb2.com
+      AWS_ENDPOINT: ${AWS_ENDPOINT}
+      
+      # Force Path Style for S3-compatible services
+      # Set to "true" for services like MinIO, DigitalOcean Spaces, Wasabi
+      AWS_FORCE_PATH_STYLE: ${AWS_FORCE_PATH_STYLE:-false}
+      
+      # Application Configuration
+      APPLICATION_URL: ${APPLICATION_URL:-http://localhost:3000}
+      APPLICATION_NAME: ${APPLICATION_NAME:-SciNote}
+      
+      # Email Configuration (Optional)
+      MAIL_SERVER_URL: ${MAIL_SERVER_URL}
+      MAIL_SERVER_PORT: ${MAIL_SERVER_PORT:-587}
+      MAIL_SERVER_USERNAME: ${MAIL_SERVER_USERNAME}
+      MAIL_SERVER_PASSWORD: ${MAIL_SERVER_PASSWORD}
+      MAIL_FROM: ${MAIL_FROM:-noreply@scinote.net}
+      
+      # Active Storage Features
+      ACTIVESTORAGE_ENABLE_PDF_PREVIEWS: "true"
+      ACTIVESTORAGE_ENABLE_VIPS: "true"
+      
+      # Database Pool
+      DB_POOL: ${DB_POOL:-25}
+      RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-5}
+      
+      # Additional Configuration
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      
+    volumes:
+      # Local storage fallback (not used when S3 is configured)
+      - storage_data:/usr/src/app/storage
+      - public_system:/usr/src/app/public/system
+    networks:
+      - scinote_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Background Jobs Worker
+  jobs:
+    build:
+      context: ./scinote-web
+      dockerfile: Dockerfile.production
+    container_name: scinote_jobs
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    command: rake jobs:work
+    environment:
+      # Rails Environment
+      RAILS_ENV: production
+      RAILS_LOG_TO_STDOUT: "true"
+      
+      # Secret Key Base (MUST match web service)
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      
+      # Database Configuration
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-scinote_production}
+      
+      # Redis Configuration
+      REDIS_URL: redis://redis:6379/0
+      
+      # Active Storage Configuration - S3
+      ACTIVESTORAGE_SERVICE: ${ACTIVESTORAGE_SERVICE:-amazon}
+      
+      # S3 Provider Configuration (AWS or S3-compatible services)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_SUBFOLDER: ${S3_SUBFOLDER:-scinote}
+      
+      # S3-Compatible Services Configuration
+      # Set AWS_ENDPOINT to use S3-compatible services (DigitalOcean, Wasabi, MinIO, etc.)
+      # Examples:
+      #   DigitalOcean Spaces: https://nyc3.digitaloceanspaces.com
+      #   Wasabi: https://s3.wasabisys.com
+      #   MinIO: http://minio-server:9000
+      #   Backblaze B2: https://s3.us-west-000.backblazeb2.com
+      AWS_ENDPOINT: ${AWS_ENDPOINT}
+      
+      # Force Path Style for S3-compatible services
+      # Set to "true" for services like MinIO, DigitalOcean Spaces, Wasabi
+      AWS_FORCE_PATH_STYLE: ${AWS_FORCE_PATH_STYLE:-false}
+      
+      # Application Configuration
+      APPLICATION_URL: ${APPLICATION_URL:-http://localhost:3000}
+      
+      # Active Storage Features
+      ACTIVESTORAGE_ENABLE_PDF_PREVIEWS: "true"
+      ACTIVESTORAGE_ENABLE_VIPS: "true"
+      
+      # Database Pool
+      DB_POOL: ${DB_POOL:-25}
+      
+    volumes:
+      # Local storage fallback (not used when S3 is configured)
+      - storage_data:/usr/src/app/storage
+      - public_system:/usr/src/app/public/system
+    networks:
+      - scinote_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  storage_data:
+    driver: local
+  public_system:
+    driver: local
+
+networks:
+  scinote_network:
+    driver: bridge
