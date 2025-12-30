@@ -1,0 +1,20 @@
+# This override file prevents Easypanel from creating its own override
+# All port mappings are already defined in docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    ports:
+      - "${POSTGRES_PORT:-54329}:5432"
+  
+  redis:
+    ports:
+      - "${REDIS_PORT:-63791}:6379"
+  
+  web:
+    ports:
+      - "${WEB_PORT:-37842}:3000"
+  
+  jobs:
+    # No external ports needed for background jobs
+    ports: []
